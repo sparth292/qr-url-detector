@@ -1,43 +1,43 @@
+from flask import Flask, request, jsonify
 import joblib
 import re
+import os
 
-# --- 1. Load your model ---
-MODEL_PATH = "model/malicious_qr_model.pkl"
+app = Flask(__name__)
+
+# --- 1. Load model ---
+MODEL_PATH = os.path.join("model", "malicious_qr_model.pkl")
 model = joblib.load(MODEL_PATH)
-print("Model loaded")
+print("Model loaded successfully")
 
-# --- 2. Feature extractor (7 features for demo) ---
+# --- 2. Feature extractor ---
 def extract_features(url):
     url = url.lower()
     features = [
-        len(url),                       # URL length
-        url.count('.'),                  # number of dots
-        int(url.startswith('https')),    # https?
-        int(bool(re.search(r'login|verify|secure|account', url))),  # suspicious keywords
-        url.count('-') + url.count('_'), # hyphens and underscores
+        len(url),                         # URL length
+        url.count('.'),                   # number of dots
+        int(url.startswith('https')),     # https?
+        int(bool(re.search(r'login|verify|secure|account', url))),
+        url.count('-') + url.count('_'),  # hyphens and underscores
         int(bool(re.match(r'\d+\.\d+\.\d+\.\d+', url))),  # IP as domain
-        int(bool(re.search(r'\?', url))) # query params
+        int(bool(re.search(r'\?', url)))  # query params
     ]
     return features
 
-# --- 3. Analyze URL ---
+# --- 3. URL analysis ---
 def analyze_url(url):
-    # Extract features
     features = extract_features(url)
-    
-    # Pad features to match model input (84 features)
-    if len(features) < 84:
-        features += [0]*(84 - len(features))
 
-    # Predict
+    # Pad to 84 features
+    if len(features) < 84:
+        features += [0] * (84 - len(features))
+
     prediction = model.predict([features])[0]
     probs = model.predict_proba([features])[0]
 
-    # Generate a simple risk score and reasons
-    risk_score = round(probs[1]*100, 2)  # probability of being malicious
+    risk_score = round(probs[1] * 100, 2)
     verdict = "Malicious" if prediction == 1 else "Safe"
 
-    # Simple explanation
     reasons = []
     if len(url) > 50:
         reasons.append("URL is very long")
@@ -54,20 +54,31 @@ def analyze_url(url):
 
     return risk_score, verdict, reasons
 
-# --- 4. Main program ---
-print("\n QR / URL Malicious Detector\n")
+# --- 4. Routes ---
+@app.route("/")
+def home():
+    return "Malicious QR / URL Detection API is running"
 
-while True:
-    url = input("Enter URL (or 'exit' to quit): ").strip()
-    if url.lower() == "exit":
-        break
+@app.route("/scan", methods=["POST"])
+def scan():
+    data = request.get_json()
+
+    if not data or "url" not in data:
+        return jsonify({"error": "URL not provided"}), 400
+
+    url = data["url"]
+
     try:
         risk, verdict, reasons = analyze_url(url)
-        print(f"\n URL Verdict: {verdict}")
-        print(f" Risk Score: {risk}%")
-        print("Reasons:")
-        for r in reasons:
-            print(f" - {r}")
-        print("\n" + "-"*40 + "\n")
+        return jsonify({
+            "url": url,
+            "verdict": verdict,
+            "risk_score": f"{risk}%",
+            "reasons": reasons
+        })
     except Exception as e:
-        print(f"Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# --- 5. Run locally ---
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
